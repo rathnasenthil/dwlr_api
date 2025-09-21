@@ -1,4 +1,5 @@
 from flask import Flask, request, jsonify
+from flask_cors import CORS   # ✅ Import CORS
 import joblib
 import pandas as pd
 import os
@@ -33,6 +34,12 @@ else:
 # -------------------
 app = Flask(__name__)
 
+# ✅ Enable CORS (all origins allowed for now)
+CORS(app)
+
+# If you want to restrict to specific frontend only:
+# CORS(app, origins=["http://localhost:3000", "https://your-frontend-domain.com"])
+
 # Load saved models
 rf = joblib.load("random_forest_model.pkl")   # Random Forest
 arima_model = joblib.load("arima_model.pkl")  # ARIMA (baseline)
@@ -62,7 +69,7 @@ def get_predictions(limit=10):
 # -------------------
 @app.route('/')
 def home():
-    return "🌊 Groundwater AI API is running with Supabase!"
+    return "🌊 Groundwater AI API is running with Supabase + CORS enabled!"
 
 @app.route('/predict', methods=['POST'])
 def predict():
