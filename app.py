@@ -2,18 +2,31 @@ from flask import Flask, request, jsonify
 import joblib
 import pandas as pd
 import os
+
+# Optional: load .env locally
 from dotenv import load_dotenv
-from supabase import create_client, Client
+try:
+    load_dotenv()
+except:
+    pass
 
 # -------------------
-# Load environment variables
+# Load Supabase environment variables
 # -------------------
-load_dotenv()
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 
-# Initialize Supabase client
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+# Debug: make sure env variables are loaded
+print("SUPABASE_URL =", SUPABASE_URL)
+print("SUPABASE_KEY =", SUPABASE_KEY)
+
+# Only import Supabase if env variables exist
+supabase = None
+if SUPABASE_URL and SUPABASE_KEY:
+    from supabase import create_client, Client
+    supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+else:
+    print("Warning: Supabase not initialized. Predictions will not be saved.")
 
 # -------------------
 # Initialize Flask app
@@ -28,15 +41,21 @@ arima_model = joblib.load("arima_model.pkl")  # ARIMA (baseline)
 # Supabase helper functions
 # -------------------
 def save_prediction(input_data, result):
-    supabase.table("predictions").insert({
-        "input_data": input_data,
-        "prediction": result,
-        "source": "backend"
-    }).execute()
+    if supabase:
+        supabase.table("predictions").insert({
+            "input_data": input_data,
+            "prediction": result,
+            "source": "backend"
+        }).execute()
+    else:
+        print("Supabase not available. Skipping save.")
 
 def get_predictions(limit=10):
-    response = supabase.table("predictions").select("*").order("created_at", desc=True).limit(limit).execute()
-    return response.data
+    if supabase:
+        response = supabase.table("predictions").select("*").order("created_at", desc=True).limit(limit).execute()
+        return response.data
+    else:
+        return []
 
 # -------------------
 # Routes
@@ -48,17 +67,13 @@ def home():
 @app.route('/predict', methods=['POST'])
 def predict():
     try:
-        # Receive JSON data
         data = request.json
-        df = pd.DataFrame([data])  # convert input to dataframe
+        df = pd.DataFrame([data])
 
-        # Random Forest prediction
         rf_pred = rf.predict(df)[0]
-
-        # ARIMA forecast
         arima_forecast = arima_model.forecast(steps=1)[0]
 
-        # Decision Support Layer
+        # Decision support
         if rf_pred < 1:
             level_status = "🚨 Groundwater level is critically low."
         elif 1 <= rf_pred < 3:
@@ -71,7 +86,6 @@ def predict():
         else:
             recharge_status = "⚠️ Recharge rate is low, risk of depletion ahead."
 
-        # Response JSON
         response = {
             "rf_prediction": round(float(rf_pred), 2),
             "arima_forecast": round(float(arima_forecast), 2),
@@ -81,9 +95,8 @@ def predict():
             }
         }
 
-        # Save prediction to Supabase
+        # Save to Supabase
         save_prediction(data, response)
-
         return jsonify(response)
 
     except Exception as e:
